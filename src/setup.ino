@@ -20,7 +20,7 @@ const char* MQTT_TOPIC = "iot/teste";
 WiFiClientSecure espClient;
 PubSubClient client(espClient);
 
-// --- Conexão Wi-Fi ---
+// -- Conexão Wi-Fi --
 void setup_wifi() {
   Serial.print("Conectando ao Wi-Fi ");
   Serial.println(WIFI_SSID);
