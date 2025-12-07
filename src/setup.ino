@@ -1,74 +1,32 @@
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <PubSubClient.h>
+//                                VIDA DE SILICIO
+//                                    KIT ESP32
+//                                      AULA 5 
+//                            PROGRAMA 1 : PROJETO MEDINDO A DISTÂNCIA  
 
-// MQTT
-extern const char* MQTT_SERVER;
-extern const int   MQTT_PORT;
-extern const char* MQTT_TOPIC;
 
-const char* WIFI_SSID = "Wokwi-GUEST";
-const char* WIFI_PASSWORD = "";
-
-const char* MQTT_SERVER = "7ae0f6e47e40403da1395867bebba435.s1.eu.hivemq.cloud";
-const int   MQTT_PORT = 8883; // TLS
-const char* MQTT_USER = "teste_mqtt";
-const char* MQTT_PASSWORD = "Teste123";
-const char* MQTT_TOPIC = "iot/teste";
-
-// Objetos de rede
-WiFiClientSecure espClient;
-PubSubClient client(espClient);
-
-// -- Conexão Wi-Fi --
-void setup_wifi() {
-  Serial.print("Conectando ao Wi-Fi ");
-  Serial.println(WIFI_SSID);
-
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println("\nWi-Fi conectado!");
-  Serial.print("Endereço IP: ");
-  Serial.println(WiFi.localIP());
-}
-
-// --- Conexão MQTT ---
-void reconnect_mqtt() {
-  while (!client.connected()) {
-    Serial.print("Conectando ao broker MQTT... ");
-    if (client.connect("ESP32Publisher", MQTT_USER, MQTT_PASSWORD)) {
-      Serial.println("Conectado!");
-    }
-    else {
-      Serial.print("Falhou (rc=");
-      Serial.print(client.state());
-      Serial.println("). Tentando novamente em 5s...");
-      delay(5000);
-    }
-  }
-}
+const int PINO_TRIG = 4; // Pino D4 conectado ao TRIG do HC-SR04
+const int PINO_ECHO = 2; // Pino D2 conectado ao ECHO do HC-SR04
 
 void setup() {
-  Serial.begin(115200);
-  setup_wifi();
-
-  espClient.setInsecure();  // Ignora verificação de certificado (TLS simplificado)
-  client.setServer(MQTT_SERVER, MQTT_PORT);
+  Serial.begin(9600); // Inicializa a comunicação serial
+  pinMode(PINO_TRIG, OUTPUT); // Configura o pino TRIG como saída
+  pinMode(PINO_ECHO, INPUT); // Configura o pino ECHO como entrada
 }
 
 void loop() {
-  if (!client.connected()) reconnect_mqtt();
-  client.loop();
-
-  // --- Publica mensagem ---
-  const char* msg = "Hello World!";
-  client.publish(MQTT_TOPIC, msg);
-  Serial.print("Mensagem publicada: ");
-  Serial.println(msg);
-
-  delay(2000);
+  digitalWrite(PINO_TRIG, LOW);
+  delayMicroseconds(2);
+  digitalWrite(PINO_TRIG, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(PINO_TRIG, LOW);
+  
+  long duracao = pulseIn(PINO_ECHO, HIGH); // Mede o tempo de resposta do ECHO  
+  float distancia = (duracao * 0.0343) / 2;// Calcula a distância usando a velocidade do som (aproximadamente 343 m/s)
+  Serial.print("Distância: ");
+  Serial.print(distancia);
+  Serial.println(" cm");
+  
+  delay(1000); // Aguarda 1 segundo antes de fazer a próxima leitura
 }
+//long -> A variável "long" é utilizada para armazenar números inteiros longos, ou seja, números inteiros maiores do que os que podem ser armazenados em uma variável "int"
+//delayMicroseconds -> A função delayMicroseconds() lida com microssegundos (10 elevado a -6 segundos), enquanto a função delay() lida com milissegundos (10 elevado a -3 segundos).
