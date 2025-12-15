@@ -1,1 +1,7 @@
 .pio
+.vscode
+build/*
+include/secret.h
+platformio.ini
+sdkconfig.esp32dev
+dataset/*
