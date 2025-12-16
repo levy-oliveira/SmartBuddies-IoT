@@ -1,27 +1,14 @@
+#include <BluetoothSerial.h>
 #include <ArduinoJson.h>
-#include <WiFi.h>
-#include <WiFiClientSecure.h>
-#include <PubSubClient.h>
 #include <Adafruit_MPU6050.h>
 #include <Adafruit_Sensor.h>
 #include <Wire.h>
 #include <math.h>
+#include <Modelo-movimento-dog_inferencing.h>
 
-// ======== Configurações WiFi ========
-const char* ssid = "";
-const char* password = "";
+#define FREQUENCIA_HZ 100
+#define INTERVALO_ENVIO_BT_MS 1000
 
-// ======== Configurações MQTT (TagoIO) ========
-const char* mqtt_server = "7ae0f6e47e40403da1395867bebba435.s1.eu.hivemq.cloud";
-const int mqtt_port = 8883;
-const char* mqtt_user = "teste_mqtt";
-const char* mqtt_password = "Teste123";
-
-// ======== Tópicos MQTT ========
-const char* topic_pitch = "info/pitch";
-const char* topic_roll = "info/roll";
-const char* topic_yaw = "info/yaw";
-const char* topic_passos = "info/passos";
 
 // ======== Variáveis JSON ========
 char pitch_json[100];
@@ -29,9 +16,8 @@ char roll_json[100];
 char yaw_json[100];
 char passos_json[100];
 
-// ======== Objetos WiFi e MQTT ========
-WiFiClientSecure espClient;
-PubSubClient client(espClient);
+// ======== Objetos BluetoothSerial ========
+BluetoothSerial SerialBT;
 
 // ======== Objeto MPU6050 ========
 Adafruit_MPU6050 mpu;
@@ -41,56 +27,25 @@ float pitch = 0, roll = 0;
 int passos = 0;
 bool passoDetectado = false;
 unsigned long lastTime = 0;
+unsigned long ultimo_envio_bt = 0;  
 unsigned long lastReconnectAttempt = 0;
+String estado_anterior = "PARADO";
 
-// ======== Conectar ao WiFi ========
-void setup_wifi() {
-  delay(10);
-  Serial.println();
-  Serial.print("Conectando ao WiFi: ");
-  Serial.println(ssid);
-  
-  WiFi.begin(ssid, password);
-  
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-  
-  Serial.println("");
-  Serial.println("WiFi conectado!");
-  Serial.print("Endereço IP: ");
-  Serial.println(WiFi.localIP());
-}
+// ======== Variáveis do Modelo ========
+#define EI_CLASSIFIER_SENSOR_AXES_COUNT 6
+float features[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE]; // Buffer da IA
 
-// ======== Reconectar ao MQTT ========
-boolean reconnect() {
-    while(!client.connected()) {
-        Serial.println("Reconectando ao MQTT...");
-        if (client.connect("ESP32Publisher", mqtt_user, mqtt_password)) {
-            Serial.println("Reconectado ao MQTT!");
-        } else {
-            Serial.print("Falha na conexão, rc=");
-            Serial.print(client.state());
-            Serial.println(" Tentando novamente em 5 segundos");
-            delay(5000);
-        }
-    }
-    return client.connected();
-}
+
 // ======== Setup inicial ========
 void setup() {
   Serial.begin(115200);
-  
-  // Conecta ao WiFi
-  setup_wifi();
-  
-  // Configura servidor MQTT
-  espClient.setInsecure(); 
-  client.setServer(mqtt_server, mqtt_port);
+  SerialBT.begin("SmartPet_Device");
+  Serial.println("SmartPet Iniciado");
+
+  Wire.begin(21, 22);
   
   // Inicializa MPU6050 com Adafruit
-  if (!mpu.begin()) {
+  if (!mpu.begin(0x68)) {
     Serial.println("Falha ao inicializar MPU6050!");
     while (1) {
       delay(10);
@@ -99,8 +54,8 @@ void setup() {
   Serial.println("MPU6050 inicializado com sucesso!");
   
   // Configurações do sensor
-  mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
-  mpu.setGyroRange(MPU6050_RANGE_250_DEG);
+  mpu.setAccelerometerRange(MPU6050_RANGE_4_G);
+  mpu.setGyroRange(MPU6050_RANGE_500_DEG);
   mpu.setFilterBandwidth(MPU6050_BAND_21_HZ);
   
   lastTime = millis();
@@ -149,74 +104,93 @@ void contarPassos(sensors_event_t &a) {
 
 // ======== Loop principal ========
 void loop() {
-  // Gerencia conexão MQTT
-  if (!client.connected()) {
-    unsigned long now = millis();
-    if (now - lastReconnectAttempt > 5000) {
-      lastReconnectAttempt = now;
-      Serial.println("Tentando reconectar ao MQTT...");
-      if (reconnect()) {
-        lastReconnectAttempt = 0;
-      }
-    }
-  } else {
-    client.loop();
-  }
-  
-  // Calcula delta time
-  unsigned long now = millis();
-  float dt = (now - lastTime) / 1000.0;
-  lastTime = now;
-  
-  // Lê dados do sensor
-  sensors_event_t a, g, temp;
-  mpu.getEvent(&a, &g, &temp);
-  
-  // Processa dados
-  calcularAngulos(a, g, dt);
-  contarPassos(a);
-  
-  // Publica dados apenas se conectado
-  if (client.connected()) {
-    // Cria e envia JSONs individuais para cada variável
-    StaticJsonDocument<300> jsonPitch;
-    jsonPitch["variable"] = "pitch";
-    jsonPitch["value"] = pitch;
-    serializeJson(jsonPitch, pitch_json);
-    client.publish(topic_pitch, pitch_json);
-    
-    StaticJsonDocument<300> jsonRoll;
-    jsonRoll["variable"] = "roll";
-    jsonRoll["value"] = roll;
-    serializeJson(jsonRoll, roll_json);
-    client.publish(topic_roll, roll_json);
-    
-    StaticJsonDocument<300> jsonPassos;
-    jsonPassos["variable"] = "passos";
-    jsonPassos["value"] = passos;
-    serializeJson(jsonPassos, passos_json);
-    client.publish(topic_passos, passos_json);
+  long next_sample_time = micros();
 
-        // Debug no Serial Monitor
-    Serial.println("📡 Dados enviados ao TagoIO:");
-    Serial.print("Pitch: "); Serial.print(pitch);
-    Serial.print(" | Roll: "); Serial.print(roll);
-    Serial.print(" | Passos: "); Serial.println(passos);
-    
-    Serial.print("Aceleração X: "); Serial.print(a.acceleration.x);
-    Serial.print("  Y: "); Serial.print(a.acceleration.y);
-    Serial.print("  Z: "); Serial.println(a.acceleration.z);
-    
-    Serial.print("Rotação X: "); Serial.print(g.gyro.x);
-    Serial.print("  Y: "); Serial.print(g.gyro.y);
-    Serial.print("  Z: "); Serial.println(g.gyro.z);
-    
-    Serial.print("Temperatura: "); Serial.print(temp.temperature);
-    Serial.println(" °C");
-    Serial.println("----------------------------");
+  // -------------------------------------------------------
+  // 1. BLOCO DE AMOSTRAGEM (Coleta dados + Conta passos)
+  // -------------------------------------------------------
+  // Preenchemos o buffer necessário para a IA (ex: 1.5 segundos de dados)
+  for (int i = 0; i < EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE; i += EI_CLASSIFIER_SENSOR_AXES_COUNT) {
+      
+      // Ler dados brutos do sensor
+      sensors_event_t a, g, temp;
+      mpu.getEvent(&a, &g, &temp);
+
+      // --- A. Contagem de Passos em Tempo Real ---
+      // Verificamos o passo AQUI dentro para não perder movimentos enquanto a IA carrega
+      contarPassos(a);
+
+      // --- B. Preencher Buffer da IA ---
+      features[i + 0] = a.acceleration.x;
+      features[i + 1] = a.acceleration.y;
+      features[i + 2] = a.acceleration.z;
+      features[i + 3] = g.gyro.x;
+      features[i + 4] = g.gyro.y;
+      features[i + 5] = g.gyro.z;
+
+      // Controle preciso de tempo (100Hz)
+      next_sample_time += (1000000 / FREQUENCIA_HZ);
+      while (micros() < next_sample_time); 
+  }
+
+  // -------------------------------------------------------
+  // 2. BLOCO DE INTELIGÊNCIA ARTIFICIAL (Classificação)
+  // -------------------------------------------------------
+  ei_impulse_result_t result = { 0 };
+  signal_t signal;
+  
+  // Converte array C++ para sinal Edge Impulse
+  numpy::signal_from_buffer(features, EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE, &signal);
+  
+  // Roda a Rede Neural
+  EI_IMPULSE_ERROR res = run_classifier(&signal, &result, false);
+  
+  if (res != EI_IMPULSE_OK) return;
+
+  // Descobre qual é a maior probabilidade (Parado, Caminhando, Correndo)
+  String estado_atual = "DESCONHECIDO";
+  float maior_prob = 0.0;
+
+  for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
+      if (result.classification[ix].value > maior_prob) {
+          maior_prob = result.classification[ix].value;
+          estado_atual = String(result.classification[ix].label);
+      }
   }
   
-  
-  
-  delay(1000);
+  // Filtro de confiança: Se não tiver certeza (< 60%), mantém o último estado ou define como Indefinido
+  if (maior_prob < 0.60) {
+    estado_atual = estado_anterior;
+  }
+  else{
+    estado_anterior = estado_atual;
+  }
+
+  // -------------------------------------------------------
+  // 3. BLOCO DE ENVIO BLUETOOTH (JSON)
+  // -------------------------------------------------------
+  if (millis() - ultimo_envio_bt > INTERVALO_ENVIO_BT_MS) {
+      
+      StaticJsonDocument<200> doc;
+      doc["timestamp"] = millis(); 
+      doc["passos"]    = passos;
+      doc["estado"]    = estado_atual;
+
+      char json_output[200];
+      serializeJson(doc, json_output);
+
+      if (SerialBT.hasClient()) {
+         SerialBT.println(json_output);
+      }
+      
+      // Debug Serial
+      Serial.print("Envio BT: "); Serial.println(json_output);
+
+      ultimo_envio_bt = millis();
+  }
+}
+
+int raw_feature_get_data(size_t offset, size_t length, float *out_ptr) {
+    memcpy(out_ptr, features + offset, length * sizeof(float));
+    return 0;
 }

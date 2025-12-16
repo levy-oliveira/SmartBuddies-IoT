@@ -4,6 +4,7 @@ include/secret.h
 platformio.ini
 sdkconfig.esp32dev
 dataset/*
+.vscode/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
