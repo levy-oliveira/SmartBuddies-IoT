@@ -11,9 +11,6 @@
 
 
 // ======== Variáveis JSON ========
-char pitch_json[100];
-char roll_json[100];
-char yaw_json[100];
 char passos_json[100];
 
 // ======== Objetos BluetoothSerial ========
@@ -61,26 +58,6 @@ void setup() {
   lastTime = millis();
 }
 
-// ======== Cálculo de Pitch e Roll ========
-void calcularAngulos(sensors_event_t &a, sensors_event_t &g, float dt) {
-  // Acelerômetro em g (já normalizado pela Adafruit)
-  float AccX = a.acceleration.x / 9.81;
-  float AccY = a.acceleration.y / 9.81;
-  float AccZ = a.acceleration.z / 9.81;
-  
-  // Giroscópio em graus/segundo (já convertido)
-  float GyroX = g.gyro.x * 180.0 / PI;
-  float GyroY = g.gyro.y * 180.0 / PI;
-  
-  // Ângulos do acelerômetro
-  float accPitch = atan2(AccY, sqrt(AccX * AccX + AccZ * AccZ)) * 180 / PI;
-  float accRoll  = atan2(-AccX, sqrt(AccY * AccY + AccZ * AccZ)) * 180 / PI;
-  
-  // Filtro complementar
-  pitch = 0.98 * (pitch + GyroX * dt) + 0.02 * accPitch;
-  roll  = 0.98 * (roll  + GyroY * dt) + 0.02 * accRoll;
-}
-
 // ======== Contagem simples de passos ========
 void contarPassos(sensors_event_t &a) {
   // Converte para g
@@ -97,7 +74,7 @@ void contarPassos(sensors_event_t &a) {
     passoDetectado = true;
   }
   
-  if (magnitude < 1.0) {
+  if (magnitude < 1.05) {
     passoDetectado = false;
   }
 }
@@ -121,12 +98,12 @@ void loop() {
       contarPassos(a);
 
       // --- B. Preencher Buffer da IA ---
-      features[i + 0] = a.acceleration.x;
-      features[i + 1] = a.acceleration.y;
-      features[i + 2] = a.acceleration.z;
-      features[i + 3] = g.gyro.x;
-      features[i + 4] = g.gyro.y;
-      features[i + 5] = g.gyro.z;
+      features[i + 0] = a.acceleration.x / 9.81f;
+      features[i + 1] = a.acceleration.y / 9.81f;
+      features[i + 2] = a.acceleration.z / 9.81f;
+      features[i + 3] = g.gyro.x * 57.29578f;
+      features[i + 4] = g.gyro.y * 57.29578f;
+      features[i + 5] = g.gyro.z * 57.29578f;
 
       // Controle preciso de tempo (100Hz)
       next_sample_time += (1000000 / FREQUENCIA_HZ);
@@ -148,22 +125,31 @@ void loop() {
   if (res != EI_IMPULSE_OK) return;
 
   // Descobre qual é a maior probabilidade (Parado, Caminhando, Correndo)
-  String estado_atual = "DESCONHECIDO";
+  String estado_instantaneo = "DESCONHECIDO";
   float maior_prob = 0.0;
 
   for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
       if (result.classification[ix].value > maior_prob) {
           maior_prob = result.classification[ix].value;
-          estado_atual = String(result.classification[ix].label);
+          estado_instantaneo = String(result.classification[ix].label);
       }
   }
   
-  // Filtro de confiança: Se não tiver certeza (< 60%), mantém o último estado ou define como Indefinido
-  if (maior_prob < 0.60) {
-    estado_atual = estado_anterior;
+  static int contador_confirmacao = 0;
+  static String ultimo_candidato = "";
+  const int LIMITE_CONFIRMACAO = 2;
+  String estado_final_para_envio = estado_anterior;
+
+  if (estado_instantaneo == ultimo_candidato) {
+      contador_confirmacao++;
+  } else {
+      ultimo_candidato = estado_instantaneo;
+      contador_confirmacao = 0;
   }
-  else{
-    estado_anterior = estado_atual;
+
+  if (contador_confirmacao >= LIMITE_CONFIRMACAO && maior_prob > 0.60) {
+      estado_final_para_envio = estado_instantaneo;
+      estado_anterior = estado_final_para_envio; // Atualiza o histórico
   }
 
   // -------------------------------------------------------
@@ -174,7 +160,7 @@ void loop() {
       StaticJsonDocument<200> doc;
       doc["timestamp"] = millis(); 
       doc["passos"]    = passos;
-      doc["estado"]    = estado_atual;
+      doc["estado"]    = estado_final_para_envio;
 
       char json_output[200];
       serializeJson(doc, json_output);

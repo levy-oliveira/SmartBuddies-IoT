@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Monitoramento IoT - ESP32</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Dashboard de Monitoramento</h1>
+    <div id="status">Conectando ao broker MQTT...</div>
+
+    <div class="tab">
+        <button class="tablinks active" onclick="openTab(event, 'HeartMonitor')">❤️ Monitor Cardíaco</button>
+        <button class="tablinks" onclick="openTab(event, 'Gyroscope')">📏 Giroscópio</button>
+    </div>
+
+    <div id="HeartMonitor" class="tabcontent" style="display: block;">
+        <div class="chart-container">
+            <h3>Sinal Infravermelho (IR) - Batimento</h3>
+            <canvas id="irChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <h3>Sinal Vermelho (Red) - Oximetria</h3>
+            <canvas id="redChart"></canvas>
+        </div>
+    </div>
+
+    <div id="Gyroscope" class="tabcontent">
+        <div class="chart-container">
+            <h3>Pitch</h3>
+            <canvas id="pitchChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <h3>Roll</h3>
+            <canvas id="rollChart"></canvas>
+        </div>
+        <div class="chart-container">
+            <h3>Passos</h3>
+            <canvas id="stepsChart"></canvas>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="app.js"></script>
+
+    <script>
+        // Script simples para controle das abas
+        function openTab(evt, tabName) {
+            var i, tabcontent, tablinks;
+            tabcontent = document.getElementsByClassName("tabcontent");
+            for (i = 0; i < tabcontent.length; i++) {
+                tabcontent[i].style.display = "none";
+            }
+            tablinks = document.getElementsByClassName("tablinks");
+            for (i = 0; i < tablinks.length; i++) {
+                tablinks[i].className = tablinks[i].className.replace(" active", "");
+            }
+            document.getElementById(tabName).style.display = "block";
+            evt.currentTarget.className += " active";
+        }
+    </script>
+</body>
+</html>
