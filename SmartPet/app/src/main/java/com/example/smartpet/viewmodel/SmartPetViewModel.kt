@@ -28,8 +28,9 @@ class SmartPetViewModel(application: Application) : AndroidViewModel(application
     private val _connectionStatuses = MutableStateFlow<Map<String, String>>(emptyMap())
     val connectionStatuses: StateFlow<Map<String, String>> = _connectionStatuses.asStateFlow()
 
-    private val _bpmHistories = MutableStateFlow<Map<String, List<Int>>>(emptyMap())
-    val bpmHistories: StateFlow<Map<String, List<Int>>> = _bpmHistories.asStateFlow()
+    // Histórico de atividades do cachorro para o gráfico
+    private val _dogActivityHistory = MutableStateFlow<Map<String, List<String>>>(emptyMap())
+    val dogActivityHistory: StateFlow<Map<String, List<String>>> = _dogActivityHistory.asStateFlow()
 
     private val _pairedDevices = MutableStateFlow<List<ScannedDevice>>(emptyList())
     val pairedDevices: StateFlow<List<ScannedDevice>> = _pairedDevices.asStateFlow()
@@ -74,43 +75,33 @@ class SmartPetViewModel(application: Application) : AndroidViewModel(application
 
         viewModelScope.launch {
             btService?.connectAndListen(device.address)?.collect { data ->
-                // Envia os dados para a HiveMQ
+                // Envia os dados para a HiveMQ e salva no CSV
                 mqttRepository.publish(device.address, data)
-
-                // Salva os dados no arquivo CSV
                 writeToCsv(data)
 
-                val isHeartRateData = data.type == "RESULT"
                 val isActivityData = data.dogState.isNotEmpty() || data.steps > 0
 
-                // Atualiza os cards da UI com os novos dados
-                if (isHeartRateData || isActivityData) {
+                if (isActivityData) {
+                    // Atualiza os dados gerais do pet (usado nos cards)
                     _petsData.value = _petsData.value.toMutableMap().apply {
                         this[device.address] = data
                     }
-                }
 
-                // Atualiza o gráfico de BPM apenas para o dispositivo cardíaco
-                if (isHeartRateData) {
-                    val currentList = _bpmHistories.value[device.address]?.toMutableList() ?: mutableListOf()
-                    currentList.add(data.bpm)
-                    if (currentList.size > 20) currentList.removeAt(0)
-                    _bpmHistories.value = _bpmHistories.value.toMutableMap().apply {
-                        this[device.address] = currentList
+                    // Adiciona o estado ao histórico para o gráfico
+                    val currentHistory = _dogActivityHistory.value[device.address]?.toMutableList() ?: mutableListOf()
+                    currentHistory.add(0, data.dogState) // Adiciona no início
+                    if (currentHistory.size > 60) { // Mantém o histórico com os últimos registros
+                        currentHistory.removeLast()
+                    }
+                    _dogActivityHistory.value = _dogActivityHistory.value.toMutableMap().apply {
+                        this[device.address] = currentHistory
                     }
                 }
 
                 // Atualiza o texto de status da conexão
-                val statusText = when {
-                    isHeartRateData -> data.statusIa // "Normal"
-                    isActivityData -> data.dogState // "PARADO"
-                    data.statusIa.isNotEmpty() -> data.statusIa // "Conectado!"
-                    else -> null
-                }
-
-                if (statusText != null) {
+                if (data.dogState.isNotEmpty()) {
                     _connectionStatuses.value = _connectionStatuses.value.toMutableMap().apply {
-                        this[device.address] = "$statusText (${device.name})"
+                        this[device.address] = "${data.dogState} (${device.name})"
                     }
                 }
             }
@@ -124,15 +115,13 @@ class SmartPetViewModel(application: Application) : AndroidViewModel(application
 
         try {
             if (!file.exists()) {
-                // Escreve o cabeçalho
-                file.writeText("timestamp,type,bpm,statusIa,rmssd,anomaly,steps,dogState\n")
+                file.writeText("timestamp,steps,dogState\n")
             }
-
             data?.let {
-                val csvRow = "${it.timestamp},${it.type},${it.bpm},${it.statusIa},${it.rmssd},${it.anomaly},${it.steps},${it.dogState}\n"
+                val csvRow = "${it.timestamp},${it.steps},${it.dogState}\n"
                 file.appendText(csvRow)
             }
-		} catch (e: Exception) {
+        } catch (e: Exception) {
             Log.e("SmartPetViewModel", "Erro ao escrever no CSV: ", e)
         }
     }
@@ -141,7 +130,7 @@ class SmartPetViewModel(application: Application) : AndroidViewModel(application
         btService?.disconnect(device.address)
         _petsData.value = _petsData.value.toMutableMap().apply { remove(device.address) }
         _connectionStatuses.value = _connectionStatuses.value.toMutableMap().apply { remove(device.address) }
-        _bpmHistories.value = _bpmHistories.value.toMutableMap().apply { remove(device.address) }
+        _dogActivityHistory.value = _dogActivityHistory.value.toMutableMap().apply { remove(device.address) }
     }
 
     override fun onCleared() {
