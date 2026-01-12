@@ -1,2 +1,2 @@
-# SmartPet-IoT
+# SmartBuddies-IoT
 
