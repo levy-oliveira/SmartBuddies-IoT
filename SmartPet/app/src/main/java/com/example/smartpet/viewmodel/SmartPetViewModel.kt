@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.smartpet.model.SmartPetData
+import com.example.smartpet.repository.MqttRepository
 import com.example.smartpet.repository.SmartPetBluetoothService
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -34,10 +35,11 @@ class SmartPetViewModel(application: Application) : AndroidViewModel(application
     val pairedDevices: StateFlow<List<ScannedDevice>> = _pairedDevices.asStateFlow()
 
     private var btService: SmartPetBluetoothService? = null
+    private var mqttRepository: MqttRepository
     private var bluetoothAdapter: BluetoothAdapter? = null
 
     init {
-        // Inicia o cabeçalho do CSV se o arquivo não existir
+        mqttRepository = MqttRepository(application)
         viewModelScope.launch(Dispatchers.IO) {
             writeToCsv(null)
         }
@@ -72,7 +74,8 @@ class SmartPetViewModel(application: Application) : AndroidViewModel(application
 
         viewModelScope.launch {
             btService?.connectAndListen(device.address)?.collect { data ->
-                Log.d("SmartPetViewModel", "Dado recebido de ${device.address}: $data")
+                // Envia os dados para a HiveMQ
+                mqttRepository.publish(device.address, data)
 
                 // Salva os dados no arquivo CSV
                 writeToCsv(data)
@@ -144,5 +147,6 @@ class SmartPetViewModel(application: Application) : AndroidViewModel(application
     override fun onCleared() {
         super.onCleared()
         btService?.disconnectAll()
+        mqttRepository.disconnect()
     }
 }

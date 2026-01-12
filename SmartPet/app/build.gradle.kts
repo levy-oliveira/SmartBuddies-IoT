@@ -28,14 +28,18 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        sourceCompatibility = JavaVersion.VERSION_1_8
+        targetCompatibility = JavaVersion.VERSION_1_8
     }
     kotlinOptions {
-        jvmTarget = "11"
+        jvmTarget = "1.8"
     }
     buildFeatures {
         compose = true
+    }
+    packaging {
+        resources.excludes.add("META-INF/INDEX.LIST")
+        resources.excludes.add("META-INF/io.netty.versions.properties")
     }
 }
 
@@ -52,6 +56,8 @@ dependencies {
     // --- DEPENDÊNCIAS
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("androidx.compose.material:material-icons-extended:1.7.5")
+    implementation("com.hivemq:hivemq-mqtt-client:1.3.0")
+
 
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
